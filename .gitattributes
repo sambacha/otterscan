@@ -1,0 +1,3 @@
+# -*- mode: gitattributes; -*-
+conf.d linguist-language=Nginx
+*.conf linguist-language=Nginx
