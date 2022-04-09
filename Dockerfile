@@ -1,14 +1,17 @@
 FROM node:16.14.0-alpine3.15 AS builder
 WORKDIR /otterscan-build
+COPY ["public", "/otterscan-build/public/"]
+
 COPY ["package.json", "package-lock.json", "/otterscan-build/"]
 RUN npm install
 COPY ["run-nginx.sh", "tsconfig.json", "craco.config.js", "tailwind.config.js", "/otterscan-build/"]
-COPY ["public", "/otterscan-build/public/"]
+
 COPY ["src", "/otterscan-build/src/"]
+
 RUN npm run build
 
 FROM alpine:3.15.0 AS logobuilder
-RUN apk add imagemagick parallel
+RUN apk --no-cache add imagemagick parallel
 WORKDIR /assets
 COPY trustwallet/blockchains/ethereum/assets /assets/1/
 COPY trustwallet/blockchains/polygon/assets /assets/137/
@@ -90,7 +93,7 @@ RUN set -ex \
            apk add --no-cache --allow-untrusted /tmp/packages/nginx-module-${module}-${NGINX_VERSION}*.apk; \
        done \
     && rm -rf /tmp/packages
-RUN apk update && apk add jq
+
 COPY --from=chainsbuilder /chains /usr/share/nginx/html/chains/
 COPY --from=topic0builder /topic0 /usr/share/nginx/html/topic0/
 COPY --from=fourbytesbuilder /signatures /usr/share/nginx/html/signatures/
@@ -100,5 +103,24 @@ COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=builder /otterscan-build/build /usr/share/nginx/html/
 COPY --from=builder /otterscan-build/run-nginx.sh /
 WORKDIR /
+
+RUN apk --no-cache upgrade && \
+    scanelf --needed --nobanner --format '%n#p' /usr/sbin/nginx /usr/lib/nginx/modules/*.so /usr/local/bin/envsubst \
+            | tr ',' '\n' \
+            | awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
+            | xargs apk add --no-cache \
+    && \
+    apk add --no-cache tzdata
+
+RUN addgroup -S nginx && \
+    adduser -D -S -h /var/cache/nginx -s /sbin/nologin -G nginx nginx && \
+    install -g nginx -o nginx -d /var/cache/ngx_pagespeed && \
+    mkdir -p /var/log/nginx && \
+    ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log
+
+EXPOSE 80
+
+STOPSIGNAL SIGTERM
 
 CMD ["/run-nginx.sh"]
